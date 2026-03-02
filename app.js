@@ -1,6 +1,6 @@
-const STORAGE_KEY = "outreachops_mvp_v2";
+const STORAGE_KEY = "outreachops_mvp_v1";
 const SOURCE_WEIGHTS = { public: 1.0, org: 1.2, provider: 1.4 };
-const APG_K = 3;
+const APG_K = 10;
 const APG_WINDOW_DAYS = 7;
 const EPSILON = 0.1;
 
@@ -16,57 +16,63 @@ const GRID_CELLS = [
   { id: "G-C3", bounds: [[37.764, -122.415], [37.768, -122.409]] },
 ];
 
-function seededState() {
+const defaultResources = [
+  { resource_id: "R1", resource_type: "shelter", availability_state: "available", capacity_score: 3, updated_at: Date.now() },
+  { resource_id: "R2", resource_type: "food", availability_state: "limited", capacity_score: 2, updated_at: Date.now() },
+  { resource_id: "R3", resource_type: "medical", availability_state: "available", capacity_score: 4, updated_at: Date.now() },
+];
+
+function seedSignals() {
   const now = Date.now();
-  return {
-    signals: [
-      { created_at: now - 35 * 60000, source_type: "public", category: "shelter", grid_id: "G-B2", status: "open", weight: 1 },
-      { created_at: now - 24 * 60000, source_type: "org", category: "food", grid_id: "G-A2", status: "open", weight: 1 },
-      { created_at: now - 20 * 60000, source_type: "public", category: "medical", grid_id: "G-C1", status: "open", weight: 1 },
-      { created_at: now - 18 * 60000, source_type: "provider", category: "food", grid_id: "G-B2", status: "closed", weight: 1 },
-      { created_at: now - 14 * 60000, source_type: "org", category: "shelter", grid_id: "G-A1", status: "open", weight: 1 },
-      { created_at: now - 8 * 60000, source_type: "public", category: "hygiene", grid_id: "G-B3", status: "open", weight: 1 },
-      { created_at: now - 6 * 60000, source_type: "public", category: "food", grid_id: "G-C2", status: "open", weight: 1 },
-    ],
-    resources: [
-      { resource_id: "R1", resource_type: "shelter", availability_state: "available", capacity_score: 3, updated_at: now },
-      { resource_id: "R2", resource_type: "food", availability_state: "limited", capacity_score: 2, updated_at: now },
-      { resource_id: "R3", resource_type: "medical", availability_state: "available", capacity_score: 2, updated_at: now },
-    ],
-    logs: [
-      { created_at: now - 10 * 60000, org_id: "demo-org", grid_id: "G-B2", action: "visit", outcome: "resolved" },
-      { created_at: now - 7 * 60000, org_id: "demo-org", grid_id: "G-C3", action: "call", outcome: "pending" },
-    ],
-    sessionSubmissions: [],
-    selectedGridId: "G-B2",
-  };
+  const signals = [];
+  GRID_CELLS.forEach((cell, idx) => {
+    const base = idx % 3 === 0 ? 11 : 8;
+    for (let i = 0; i < base; i++) {
+      signals.push({
+        created_at: now - (i + idx + 1) * 3600_000,
+        source_type: i % 2 === 0 ? "public" : "org",
+        category: i % 3 === 0 ? "shelter" : "food",
+        grid_id: cell.id,
+        status: "open",
+        weight: 1,
+      });
+    }
+  });
+  return signals;
 }
 
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    const initial = seededState();
-    saveState(initial);
-    return initial;
-  }
-  return JSON.parse(raw);
+  if (raw) return JSON.parse(raw);
+  const state = {
+    signals: seedSignals(),
+    resources: defaultResources,
+    logs: [],
+    sessionSubmissions: [],
+  };
+  saveState(state);
+  return state;
 }
 
-function saveState(s) {
+function saveState(state) {
   const cutoff = Date.now() - 30 * 24 * 3600_000;
-  s.signals = s.signals.filter((x) => x.created_at >= cutoff);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  state.signals = state.signals.filter((s) => s.created_at >= cutoff);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 let state = loadState();
+let selectedGridDashboard = null;
+let selectedGridRequest = null;
 let mapsReady = false;
-let highlight = { cell: null, priority: null, kpi: false, resource: null };
 
 const dashboardMap = L.map("dashboardMap", { zoomControl: false }).setView([37.77, -122.418], 15);
 const requestMap = L.map("requestMap", { zoomControl: false }).setView([37.77, -122.418], 15);
 
 function addTiles(map) {
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors", maxZoom: 19 }).addTo(map);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors",
+    maxZoom: 19,
+  }).addTo(map);
 }
 addTiles(dashboardMap);
 addTiles(requestMap);
@@ -74,34 +80,23 @@ addTiles(requestMap);
 const dashboardLayers = {};
 const requestLayers = {};
 
-function flash(type, value = true) {
-  highlight[type] = value;
-  renderAll();
-  setTimeout(() => {
-    highlight[type] = type === "resource" || type === "priority" ? null : false;
-    if (type === "cell") highlight.cell = null;
-    renderAll();
-  }, 600);
-}
-
-function setSelectedGrid(gridId) {
-  state.selectedGridId = gridId;
-  saveState(state);
-  updateSelectedChip();
-  syncLogGrid();
-  toggleRequestButton();
-  renderMaps();
-}
-
-function updateSelectedChip() {
-  document.querySelectorAll(".selected-grid").forEach((el) => {
-    el.textContent = state.selectedGridId || "None";
-  });
-}
-
 function getAnomalyFlag(gridId) {
-  const tenMin = Date.now() - 10 * 60000;
-  return state.signals.filter((s) => s.grid_id === gridId && s.created_at >= tenMin).length >= 4;
+  const tenMin = Date.now() - 10 * 60_000;
+  const recent = state.signals.filter((s) => s.grid_id === gridId && s.created_at >= tenMin).length;
+  return recent >= 4;
+}
+
+function getDemand(gridId) {
+  const now = Date.now();
+  return state.signals
+    .filter((s) => s.grid_id === gridId && s.status === "open")
+    .reduce((sum, s) => {
+      const ageHours = (now - s.created_at) / 3600_000;
+      const timeDecay = Math.max(0.3, 1 - ageHours / (24 * 7));
+      const anomalyPenalty = getAnomalyFlag(gridId) ? 0.6 : 1;
+      const sourceW = SOURCE_WEIGHTS[s.source_type] || 1;
+      return sum + s.weight * sourceW * timeDecay * anomalyPenalty;
+    }, 0);
 }
 
 function getCoverage(gridId) {
@@ -109,109 +104,84 @@ function getCoverage(gridId) {
   return state.signals.filter((s) => s.grid_id === gridId && s.created_at >= since).length;
 }
 
-function getCount(gridId) {
-  return state.signals.filter((s) => s.grid_id === gridId && s.status === "open").length;
-}
-
-function getDemand(gridId) {
-  const now = Date.now();
-  return state.signals.filter((s) => s.grid_id === gridId && s.status === "open").reduce((sum, s) => {
-    const ageHours = (now - s.created_at) / 3600_000;
-    const timeDecay = Math.max(0.5, 1 - ageHours / (24 * 7));
-    const anomalyPenalty = getAnomalyFlag(gridId) ? 0.7 : 1;
-    const sourceW = SOURCE_WEIGHTS[s.source_type] || 1;
-    return sum + s.weight * sourceW * timeDecay * anomalyPenalty;
-  }, 0);
-}
-
 function getCapacity() {
   return state.resources.reduce((sum, r) => {
-    const m = r.availability_state === "available" ? 1 : r.availability_state === "limited" ? 0.5 : 0.1;
-    return sum + r.capacity_score * m;
+    const mult = r.availability_state === "available" ? 1 : r.availability_state === "limited" ? 0.6 : 0.2;
+    return sum + (r.capacity_score || 0) * mult;
   }, 0);
 }
 
 function computePriority() {
-  const cap = getCapacity();
+  const capacity = getCapacity();
   return GRID_CELLS.map((cell) => {
-    const insufficient = getCoverage(cell.id) < APG_K;
     const demand = getDemand(cell.id);
-    return {
-      grid_id: cell.id,
-      insufficient,
-      anomaly: getAnomalyFlag(cell.id),
-      demand,
-      count: getCount(cell.id),
-      capacity: cap,
-      priority: insufficient ? 0 : demand / (cap + EPSILON),
-    };
+    const apgCoverage = getCoverage(cell.id);
+    const anomaly = getAnomalyFlag(cell.id);
+    const p = demand / (capacity + EPSILON);
+    return { grid_id: cell.id, demand, capacity, priority: p, insufficient: apgCoverage < APG_K, anomaly, coverage: apgCoverage };
   }).sort((a, b) => b.priority - a.priority);
 }
 
 function calculateKPIs() {
   const backlog = state.signals.filter((s) => {
     if (s.status !== "open") return false;
-    const resolved = state.logs.some((l) => l.grid_id === s.grid_id && l.outcome === "resolved" && l.created_at >= s.created_at);
+    const resolved = state.logs.some((l) => l.grid_id === s.grid_id && l.outcome === "resolved");
     return !resolved;
   }).length;
 
-  const responseSet = state.logs
-    .filter((l) => l.outcome === "resolved")
-    .map((log) => {
-      const req = state.signals
-        .filter((s) => s.grid_id === log.grid_id && s.created_at <= log.created_at)
-        .sort((a, b) => b.created_at - a.created_at)[0];
-      if (!req) return null;
-      return (log.created_at - req.created_at) / 60000;
+  const responseMinutes = state.signals
+    .map((s) => {
+      const firstLog = state.logs
+        .filter((l) => l.grid_id === s.grid_id && l.created_at >= s.created_at)
+        .sort((a, b) => a.created_at - b.created_at)[0];
+      return firstLog ? (firstLog.created_at - s.created_at) / 60000 : null;
     })
-    .filter((x) => x !== null);
+    .filter((m) => m !== null);
 
-  const avg = responseSet.length ? (responseSet.reduce((a, b) => a + b, 0) / responseSet.length).toFixed(1) : "0.0";
+  const avg = responseMinutes.length
+    ? (responseMinutes.reduce((a, b) => a + b, 0) / responseMinutes.length).toFixed(1)
+    : "0.0";
+
   return { backlog, avg };
-}
-
-function styleForCell(item, isSelected) {
-  const color = item.insufficient ? "#f59e0b" : item.anomaly ? "#f97316" : item.priority > 0.26 ? "#0ea5e9" : item.priority > 0.15 ? "#0d9488" : "#64748b";
-  const weight = isSelected ? 5 : 3;
-  return { color, weight, fillOpacity: 0.28 };
-}
-
-function labelForCell(item) {
-  if (item.insufficient) return `${item.grid_id}\n데이터 부족`;
-  return `${item.grid_id}\nCount ${item.count}`;
 }
 
 function renderMaps() {
   const priority = computePriority();
-  const byGrid = Object.fromEntries(priority.map((p) => [p.grid_id, p]));
-
+  const lookup = Object.fromEntries(priority.map((p) => [p.grid_id, p]));
   GRID_CELLS.forEach((cell) => {
-    const item = byGrid[cell.id];
-    const style = styleForCell(item, state.selectedGridId === cell.id);
+    const p = lookup[cell.id];
+    const color = p.insufficient ? "#f5a623" : p.anomaly ? "#f97316" : "#0d9488";
+    const weightDash = selectedGridDashboard === cell.id ? 4 : 2;
+    const weightReq = selectedGridRequest === cell.id ? 4 : 2;
 
     if (!dashboardLayers[cell.id]) {
-      const rect = L.rectangle(cell.bounds, style).addTo(dashboardMap);
-      rect.bindTooltip(labelForCell(item), { permanent: true, direction: "center", className: "cell-label" });
-      rect.on("click", () => setSelectedGrid(cell.id));
+      const rect = L.rectangle(cell.bounds, { color, weight: weightDash, fillOpacity: 0.18 }).addTo(dashboardMap);
+      rect.bindTooltip(`${cell.id}\n${p.demand.toFixed(1)}`, { permanent: true, direction: "center", className: "cell-label" });
+      rect.on("click", () => {
+        selectedGridDashboard = cell.id;
+        document.getElementById("dashboardSelected").textContent = cell.id;
+        syncLogGrid();
+        renderAll();
+      });
       dashboardLayers[cell.id] = rect;
     } else {
-      dashboardLayers[cell.id].setStyle(style);
-      dashboardLayers[cell.id].setTooltipContent(labelForCell(item));
+      dashboardLayers[cell.id].setStyle({ color, weight: weightDash });
+      dashboardLayers[cell.id].setTooltipContent(`${cell.id}\n${p.demand.toFixed(1)}`);
     }
 
     if (!requestLayers[cell.id]) {
-      const rect2 = L.rectangle(cell.bounds, style).addTo(requestMap);
-      rect2.bindTooltip(labelForCell(item), { permanent: true, direction: "center", className: "cell-label" });
-      rect2.on("click", () => setSelectedGrid(cell.id));
+      const rect2 = L.rectangle(cell.bounds, { color, weight: weightReq, fillOpacity: 0.18 }).addTo(requestMap);
+      rect2.bindTooltip(`${cell.id}\n${p.demand.toFixed(1)}`, { permanent: true, direction: "center", className: "cell-label" });
+      rect2.on("click", () => {
+        selectedGridRequest = cell.id;
+        document.getElementById("requestSelected").textContent = cell.id;
+        toggleRequestButton();
+        renderAll();
+      });
       requestLayers[cell.id] = rect2;
     } else {
-      requestLayers[cell.id].setStyle(style);
-      requestLayers[cell.id].setTooltipContent(labelForCell(item));
-    }
-
-    if (highlight.cell === cell.id) {
-      dashboardLayers[cell.id].setStyle({ weight: 7, color: "#2563eb" });
-      requestLayers[cell.id].setStyle({ weight: 7, color: "#2563eb" });
+      requestLayers[cell.id].setStyle({ color, weight: weightReq });
+      requestLayers[cell.id].setTooltipContent(`${cell.id}\n${p.demand.toFixed(1)}`);
     }
   });
 
@@ -226,19 +196,13 @@ function renderMaps() {
 
 function renderPriority() {
   const list = document.getElementById("priorityList");
-  const oldTop = list.firstElementChild?.dataset.grid || "";
   list.innerHTML = "";
-
   computePriority().slice(0, 6).forEach((item) => {
     const li = document.createElement("li");
     li.className = "priority-item";
-    li.dataset.grid = item.grid_id;
-    li.innerHTML = `<strong>${item.grid_id}</strong> P=${item.priority.toFixed(2)} · Demand=${item.insufficient ? "-" : item.demand.toFixed(1)} · Capacity=${item.capacity.toFixed(1)}
+    li.innerHTML = `<strong>${item.grid_id}</strong> P=${item.priority.toFixed(2)} · Demand=${item.demand.toFixed(1)} · Capacity=${item.capacity.toFixed(1)}
       ${item.insufficient ? '<span class="badge warn">데이터 부족</span>' : ""}
       ${item.anomaly ? '<span class="badge alert">검토/감점</span>' : ""}`;
-    if (highlight.priority === item.grid_id || oldTop !== li.dataset.grid && li.dataset.grid === computePriority()[0].grid_id) {
-      li.classList.add("flash");
-    }
     list.appendChild(li);
   });
 }
@@ -248,7 +212,7 @@ function renderResources() {
   board.innerHTML = "";
   state.resources.forEach((res) => {
     const card = document.createElement("div");
-    card.className = `resource-card ${highlight.resource === res.resource_id ? "flash" : ""}`;
+    card.className = "resource-card";
     card.innerHTML = `
       <h4>${res.resource_type.toUpperCase()}</h4>
       <label>State
@@ -260,28 +224,20 @@ function renderResources() {
       </label>
       <label>Capacity (0-5)
         <input type="number" min="0" max="5" step="1" value="${res.capacity_score}" data-id="${res.resource_id}" data-field="capacity_score" />
-      </label>`;
+      </label>
+    `;
     board.appendChild(card);
   });
 }
 
-function renderKPIs(flashKpi = false) {
+function renderKPIs() {
   const k = calculateKPIs();
   document.getElementById("kpiBacklog").textContent = String(k.backlog);
   document.getElementById("kpiResponse").textContent = String(k.avg);
-  if (flashKpi || highlight.kpi) {
-    document.getElementById("backlogCard").classList.add("flash");
-    document.getElementById("responseCard").classList.add("flash");
-    setTimeout(() => {
-      document.getElementById("backlogCard").classList.remove("flash");
-      document.getElementById("responseCard").classList.remove("flash");
-    }, 600);
-  }
 }
 
-function renderAll(flashKpi = false) {
-  updateSelectedChip();
-  renderKPIs(flashKpi);
+function renderAll() {
+  renderKPIs();
   renderPriority();
   renderResources();
   renderMaps();
@@ -289,7 +245,7 @@ function renderAll(flashKpi = false) {
 
 function toggleRequestButton() {
   const category = document.getElementById("categorySelect").value;
-  document.getElementById("submitRequest").disabled = !(category && state.selectedGridId);
+  document.getElementById("submitRequest").disabled = !(category && selectedGridRequest);
 }
 
 function showToast(text) {
@@ -301,15 +257,13 @@ function showToast(text) {
 
 function rateLimited() {
   const now = Date.now();
-  state.sessionSubmissions = state.sessionSubmissions.filter((t) => now - t < 2 * 60000);
+  state.sessionSubmissions = state.sessionSubmissions.filter((t) => now - t < 120_000);
   return state.sessionSubmissions.length >= 3;
 }
 
 function submitRequest() {
   const category = document.getElementById("categorySelect").value;
-  if (!category || !state.selectedGridId) return;
-
-  const before = calculateKPIs().backlog;
+  if (!category || !selectedGridRequest) return;
   const limited = rateLimited();
   const weight = limited ? 0.3 : 1;
   state.sessionSubmissions.push(Date.now());
@@ -317,22 +271,16 @@ function submitRequest() {
     created_at: Date.now(),
     source_type: "public",
     category,
-    grid_id: state.selectedGridId,
+    grid_id: selectedGridRequest,
     status: "open",
     weight,
   });
   saveState(state);
-
-  highlight.cell = state.selectedGridId;
-  highlight.priority = state.selectedGridId;
-  highlight.kpi = true;
+  renderAll();
   setScreen("dashboard");
-  renderAll(true);
-
-  const after = calculateKPIs().backlog;
-  showToast(`Request submitted · Backlog ${before}→${after}${limited ? " (rate-limited)" : ""}`);
-  flash("cell", state.selectedGridId);
-  flash("priority", state.selectedGridId);
+  selectedGridDashboard = selectedGridRequest;
+  document.getElementById("dashboardSelected").textContent = selectedGridDashboard;
+  showToast(limited ? "Submitted with rate-limit down-weight" : "Request submitted");
 }
 
 function syncLogGrid() {
@@ -342,44 +290,29 @@ function syncLogGrid() {
     const opt = document.createElement("option");
     opt.value = c.id;
     opt.textContent = c.id;
+    if (selectedGridDashboard === c.id) opt.selected = true;
     logGrid.appendChild(opt);
   });
-  logGrid.value = state.selectedGridId || "";
-  const hasGrid = Boolean(logGrid.value);
-  document.getElementById("saveLog").disabled = !hasGrid;
-  document.getElementById("logHint").textContent = hasGrid ? `Selected grid: ${logGrid.value}` : "Grid is required to save log.";
+  document.getElementById("saveLog").disabled = !logGrid.value;
 }
 
 function saveLog() {
   const grid = document.getElementById("logGrid").value;
   if (!grid) return;
-  setSelectedGrid(grid);
-  const backlogBefore = calculateKPIs().backlog;
-  const avgBefore = calculateKPIs().avg;
-
-  const outcome = document.getElementById("logOutcome").value;
   state.logs.push({
     created_at: Date.now(),
     org_id: "demo-org",
     grid_id: grid,
     action: document.getElementById("logAction").value,
-    outcome,
+    outcome: document.getElementById("logOutcome").value,
   });
-
-  if (outcome === "resolved") {
-    const target = state.signals
-      .filter((s) => s.grid_id === grid && s.status === "open")
-      .sort((a, b) => a.created_at - b.created_at)[0];
-    if (target) target.status = "closed";
+  if (document.getElementById("logOutcome").value === "resolved") {
+    state.signals = state.signals.map((s) => (s.grid_id === grid ? { ...s, status: "closed" } : s));
   }
-
   saveState(state);
-  renderAll(true);
+  renderAll();
   closeLogModal();
-
-  const nowKpi = calculateKPIs();
-  showToast(`Log saved · Backlog ${backlogBefore}→${nowKpi.backlog}, Avg ${avgBefore}→${nowKpi.avg}`);
-  flash("kpi");
+  showToast("Outreach log saved");
 }
 
 function closeLogModal() {
@@ -396,7 +329,9 @@ function setScreen(screenId) {
   }, 60);
 }
 
-document.querySelectorAll(".nav-btn").forEach((btn) => btn.addEventListener("click", () => setScreen(btn.dataset.screen)));
+document.querySelectorAll(".nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setScreen(btn.dataset.screen));
+});
 
 document.querySelectorAll(".sheet-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
@@ -410,7 +345,6 @@ document.querySelectorAll(".sheet-tab").forEach((tab) => {
 document.getElementById("categorySelect").addEventListener("change", toggleRequestButton);
 document.getElementById("submitRequest").addEventListener("click", submitRequest);
 document.getElementById("cancelRequest").addEventListener("click", () => setScreen("dashboard"));
-
 document.getElementById("openLogBtn").addEventListener("click", () => {
   syncLogGrid();
   document.getElementById("logModal").classList.remove("hidden");
@@ -418,36 +352,25 @@ document.getElementById("openLogBtn").addEventListener("click", () => {
 document.getElementById("closeLog").addEventListener("click", closeLogModal);
 document.getElementById("saveLog").addEventListener("click", saveLog);
 document.getElementById("logGrid").addEventListener("change", (e) => {
-  setSelectedGrid(e.target.value || null);
-  syncLogGrid();
+  document.getElementById("saveLog").disabled = !e.target.value;
 });
 
 document.getElementById("resourceBoard").addEventListener("change", (e) => {
-  const id = e.target.dataset.id;
-  const field = e.target.dataset.field;
+  const target = e.target;
+  const id = target.dataset.id;
+  const field = target.dataset.field;
   if (!id || !field) return;
-
   state.resources = state.resources.map((r) => {
     if (r.resource_id !== id) return r;
-    return { ...r, [field]: field === "capacity_score" ? Number(e.target.value) : e.target.value, updated_at: Date.now() };
+    return {
+      ...r,
+      [field]: field === "capacity_score" ? Number(target.value) : target.value,
+      updated_at: Date.now(),
+    };
   });
   saveState(state);
-  highlight.resource = id;
-  highlight.priority = computePriority()[0]?.grid_id || null;
   renderAll();
-  flash("resource", id);
-  flash("priority", highlight.priority);
-  showToast(`Resource updated · Capacity now ${getCapacity().toFixed(1)} (priority reordered)`);
-});
-
-document.getElementById("resetDemo").addEventListener("click", () => {
-  state = seededState();
-  saveState(state);
-  renderAll();
-  showToast("Demo data reset");
 });
 
 syncLogGrid();
-updateSelectedChip();
-toggleRequestButton();
 renderAll();

@@ -28,17 +28,13 @@
       <main>
         <section id="dashboard" class="screen active">
           <div class="kpi-strip">
-            <article class="kpi-card" id="backlogCard"><h2>Backlog</h2><p id="kpiBacklog">0</p></article>
-            <article class="kpi-card" id="responseCard"><h2>Avg response time (min)</h2><p id="kpiResponse">0</p></article>
+            <article class="kpi-card"><h2>Backlog</h2><p id="kpiBacklog">0</p></article>
+            <article class="kpi-card"><h2>Avg response time (min)</h2><p id="kpiResponse">0</p></article>
           </div>
           <div class="rule-line">Demand is weighted (CWS). Priority: P(cell)=Demand/(Capacity+ε), ε=0.1. APG W=7d, k=10; U&lt;k => 데이터 부족.</div>
-          <div class="legend">Legend: <span class="lg high">HIGH</span> <span class="lg med">MED</span> <span class="lg low">LOW</span> <span class="lg insuff">데이터 부족</span></div>
           <div id="dashboardMap" class="map"></div>
-          <div class="selected-chip">Selected: <span class="selected-grid">None</span></div>
-          <div class="action-row">
-            <button id="openLogBtn" class="primary">+ Outreach Log Entry</button>
-            <button id="resetDemo">Reset demo data</button>
-          </div>
+          <div class="selected-chip">Selected: <span id="dashboardSelected">None</span></div>
+          <button id="openLogBtn" class="primary">+ Outreach Log Entry</button>
           <div class="bottom-sheet">
             <div class="sheet-tabs">
               <button class="sheet-tab active" data-tab="priorityTab">Priority</button>
@@ -66,7 +62,7 @@
             </select>
           </div>
           <div id="requestMap" class="map"></div>
-          <div class="selected-chip">Selected: <span class="selected-grid">None</span></div>
+          <div class="selected-chip">Selected: <span id="requestSelected">None</span></div>
           <div class="action-row">
             <button id="submitRequest" class="primary" disabled>Submit Request</button>
             <button id="cancelRequest">Cancel</button>
@@ -90,7 +86,7 @@
     <div id="logModal" class="modal hidden">
       <div class="modal-card">
         <h3>Save Outreach Log</h3>
-        <p id="logHint" class="muted">Select a grid to save log.</p>
+        <p class="muted">Grid is required to save log.</p>
         <div class="form-row">
           <label for="logGrid">Grid</label>
           <select id="logGrid"></select>
