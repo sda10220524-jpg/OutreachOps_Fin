@@ -16,6 +16,23 @@ Open `http://localhost:4173`.
 
 1. Push this repository to GitHub.
 2. In **Settings → Pages**, choose **Deploy from branch**.
+3. Select branch and folder `/ (root)`.
+4. Save. GitHub Pages will serve `index.html`.
+
+## Demo script (F1/F2/F3)
+
+1. F1: Go to **Request**, pick category + cell, submit.
+   - Cell label updates immediately, priority row flashes/moves, Backlog increases immediately.
+2. F2: Dashboard → **Resources**, change capacity/state.
+   - Capacity effect applies instantly and priority list visibly reorders.
+3. F3: Dashboard → **Outreach Log Entry**, keep selected grid, choose `resolved`, save.
+   - Backlog decreases immediately and Avg response time updates immediately.
+
+Use **Reset demo data** to return to realistic starter values.
+
+## Data minimization
+
+Persisted only:
 3. Select branch `main` (or current) and folder `/ (root)`.
 4. Save. GitHub Pages will serve `index.html` directly.
 
