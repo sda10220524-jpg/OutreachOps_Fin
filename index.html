@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OutreachOps MVP</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <h1>OutreachOps MVP</h1>
+        <div class="nav-buttons">
+          <button class="nav-btn active" data-screen="dashboard">Dashboard</button>
+          <button class="nav-btn" data-screen="request">Request</button>
+          <button class="nav-btn" data-screen="safety">Safety</button>
+        </div>
+      </header>
+
+      <div class="banner">DEMO MODE: local-only storage. No remote dependency.</div>
+
+      <main>
+        <section id="dashboard" class="screen active">
+          <div class="kpi-strip">
+            <article class="kpi-card" id="backlogCard"><h2>Backlog</h2><p id="kpiBacklog">0</p></article>
+            <article class="kpi-card" id="responseCard"><h2>Avg response time (min)</h2><p id="kpiResponse">0</p></article>
+          </div>
+          <div class="rule-line">Demand is weighted (CWS). Priority: P(cell)=Demand/(Capacity+ε), ε=0.1. APG W=7d, k=10; U&lt;k => 데이터 부족.</div>
+          <div class="legend">Legend: <span class="lg high">HIGH</span> <span class="lg med">MED</span> <span class="lg low">LOW</span> <span class="lg insuff">데이터 부족</span></div>
+          <div id="dashboardMap" class="map"></div>
+          <div class="selected-chip">Selected: <span class="selected-grid">None</span></div>
+          <div class="action-row">
+            <button id="openLogBtn" class="primary">+ Outreach Log Entry</button>
+            <button id="resetDemo">Reset demo data</button>
+          </div>
+          <div class="bottom-sheet">
+            <div class="sheet-tabs">
+              <button class="sheet-tab active" data-tab="priorityTab">Priority</button>
+              <button class="sheet-tab" data-tab="resourcesTab">Resources</button>
+            </div>
+            <div id="priorityTab" class="sheet-content active">
+              <ul id="priorityList" class="priority-list"></ul>
+            </div>
+            <div id="resourcesTab" class="sheet-content">
+              <div id="resourceBoard" class="resource-board"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="request" class="screen">
+          <h2>New Request</h2>
+          <div class="form-row">
+            <label for="categorySelect">Category</label>
+            <select id="categorySelect">
+              <option value="">Select category</option>
+              <option value="shelter">Shelter</option>
+              <option value="food">Food</option>
+              <option value="medical">Medical</option>
+              <option value="hygiene">Hygiene</option>
+            </select>
+          </div>
+          <div id="requestMap" class="map"></div>
+          <div class="selected-chip">Selected: <span class="selected-grid">None</span></div>
+          <div class="action-row">
+            <button id="submitRequest" class="primary" disabled>Submit Request</button>
+            <button id="cancelRequest">Cancel</button>
+          </div>
+        </section>
+
+        <section id="safety" class="screen">
+          <h2>Safety Checklist</h2>
+          <ul class="checklist">
+            <li>✅ No pins, no precise coordinates, and no movement routes in public UI.</li>
+            <li>✅ No law-enforcement or crackdown targeting purpose.</li>
+            <li>✅ Data minimization: store grid_id only, never PII/lat/lng/address.</li>
+            <li>✅ Retention: raw request signals older than 30 days are purged locally.</li>
+            <li>✅ Abuse protection: rate-limit + surge/repeat anomaly detection with “검토/감점”.</li>
+            <li>✅ No tips that help people avoid outreach / continue homelessness.</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+
+    <div id="logModal" class="modal hidden">
+      <div class="modal-card">
+        <h3>Save Outreach Log</h3>
+        <p id="logHint" class="muted">Select a grid to save log.</p>
+        <div class="form-row">
+          <label for="logGrid">Grid</label>
+          <select id="logGrid"></select>
+        </div>
+        <div class="form-row">
+          <label for="logAction">Action</label>
+          <select id="logAction">
+            <option value="visit">Visit</option>
+            <option value="call">Call</option>
+            <option value="dropoff">Dropoff</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="logOutcome">Outcome</label>
+          <select id="logOutcome">
+            <option value="pending">Pending</option>
+            <option value="resolved">Resolved</option>
+          </select>
+        </div>
+        <div class="action-row">
+          <button id="saveLog" class="primary" disabled>Save</button>
+          <button id="closeLog">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="app.js"></script>
+  </body>
+</html>
